@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: invoice-scheduler
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /var/data/invoices.db
+    disk:
+      name: invoice-data
+      mountPath: /var/data
+      sizeGB: 1
