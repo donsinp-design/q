@@ -7,7 +7,7 @@ const { sendTestEmail } = require('./lib/mailer');
 const { calculateNextRun, processSchedule, startScheduler } = require('./lib/scheduler');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3030;
 const PROD = process.env.NODE_ENV === 'production';
 
 app.use(cors());
