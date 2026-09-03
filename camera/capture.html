@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intraoral Camera Capture</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;
+         background:#0f1115; color:#e6e8ec; }
+  header { padding:14px 18px; border-bottom:1px solid #23262e; display:flex;
+           gap:12px; align-items:center; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; font-weight:600; }
+  select, button { font:inherit; background:#1a1d24; color:#e6e8ec;
+                   border:1px solid #2e323c; border-radius:6px; padding:7px 11px; }
+  button { cursor:pointer; }
+  button:hover:not(:disabled) { background:#252932; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:#2f6feb; border-color:#2f6feb; color:#fff; }
+  button.primary:hover:not(:disabled) { background:#3b7bf5; }
+  main { display:grid; grid-template-columns:minmax(0,1fr) 260px; gap:16px; padding:16px; }
+  @media (max-width:820px){ main { grid-template-columns:1fr; } }
+  #stage { background:#000; border:1px solid #23262e; border-radius:8px;
+           position:relative; aspect-ratio:4/3; overflow:hidden; }
+  video { width:100%; height:100%; object-fit:contain; display:block; }
+  #status { position:absolute; inset:0; display:flex; align-items:center;
+            justify-content:center; text-align:center; padding:24px;
+            color:#9aa1ad; font-size:13px; white-space:pre-wrap; }
+  #status.err { color:#ff8b7d; }
+  aside h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em;
+             color:#8b93a1; margin:0 0 8px; }
+  #shots { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  #shots a { display:block; border:1px solid #2e323c; border-radius:6px; overflow:hidden; }
+  #shots img { width:100%; display:block; }
+  #info { margin-top:16px; font-size:12px; color:#8b93a1; word-break:break-word; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Intraoral Camera Capture</h1>
+  <select id="devices"><option>Grant access to list cameras…</option></select>
+  <div class="row">
+    <button id="start" class="primary">Start</button>
+    <button id="snap" disabled>Capture still</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+</header>
+
+<main>
+  <div id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="status">Click Start. Your browser will ask for camera permission —
+allow it, then pick the intraoral camera from the list.</div>
+  </div>
+  <aside>
+    <h2>Captures</h2>
+    <div id="shots"></div>
+    <div id="info"></div>
+  </aside>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const video = $('video'), sel = $('devices'), statusEl = $('status');
+let stream = null;
+
+function say(msg, isErr) {
+  statusEl.textContent = msg;
+  statusEl.classList.toggle('err', !!isErr);
+  statusEl.style.display = msg ? 'flex' : 'none';
+}
+
+async function listDevices() {
+  const all = await navigator.mediaDevices.enumerateDevices();
+  const cams = all.filter(d => d.kind === 'videoinput');
+  sel.innerHTML = '';
+  if (!cams.length) {
+    sel.innerHTML = '<option>No cameras detected</option>';
+    return cams;
+  }
+  cams.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || `Camera ${i + 1} (label hidden until access granted)`;
+    sel.appendChild(o);
+  });
+  // Prefer something that looks like an intraoral scope over the built-in webcam.
+  const scope = cams.find(d => /intra|oral|mouth|usb ?cam|uvc|dental/i.test(d.label));
+  if (scope) sel.value = scope.deviceId;
+  return cams;
+}
+
+function stop() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  video.srcObject = null;
+  $('snap').disabled = $('stop').disabled = true;
+  $('info').textContent = '';
+  say('Stopped.');
+}
+
+async function start() {
+  stop();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return say('This browser cannot access cameras. Use Chrome, Edge, or Safari,\n'
+             + 'and serve this page over http://localhost or https:// — not file://.', true);
+  }
+  say('Requesting camera…');
+  try {
+    const id = sel.value && sel.value.length > 3 ? sel.value : null;
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: id ? { deviceId: { exact: id } }
+                : { width: { ideal: 1280 }, height: { ideal: 960 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await listDevices();                 // labels appear only after permission
+    const track = stream.getVideoTracks()[0];
+    const s = track.getSettings();
+    $('info').textContent =
+      `${track.label}\n${s.width}×${s.height} @ ${Math.round(s.frameRate || 0)}fps`;
+    $('snap').disabled = $('stop').disabled = false;
+    say('');
+  } catch (e) {
+    const help = {
+      NotFoundError:     'No camera is connected. Run the diagnose script — the OS is not\nseeing the device, so this is power, port, or cable.',
+      NotAllowedError:   'Permission denied. Allow camera access for this site, and check\nyour OS camera privacy settings.',
+      NotReadableError:  'The camera is connected but another application is holding it.\nClose your dental software (and any video app) and retry.',
+      OverconstrainedError: 'That device rejected the requested settings. Pick a different\ncamera from the list.'
+    }[e.name];
+    say(`${e.name}: ${e.message}\n\n${help || 'Run the diagnose script for a hardware-level check.'}`, true);
+  }
+}
+
+function snap() {
+  const c = document.createElement('canvas');
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  c.getContext('2d').drawImage(video, 0, 0);
+  const url = c.toDataURL('image/png');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `intraoral-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
+  a.title = 'Click to save';
+  a.innerHTML = `<img src="${url}" alt="capture">`;
+  $('shots').prepend(a);
+}
+
+$('start').onclick = start;
+$('stop').onclick  = stop;
+$('snap').onclick  = snap;
+sel.onchange = () => { if (stream) start(); };
+navigator.mediaDevices?.addEventListener('devicechange', listDevices);
+listDevices().catch(() => {});
+</script>
+</body>
+</html>
